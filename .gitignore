@@ -1,0 +1,7 @@
+vendor
+token.json
+google_credentials.json
+data.json
+data
+.env
+.DS_Store

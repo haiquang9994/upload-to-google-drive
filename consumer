@@ -1,0 +1,91 @@
+#!/usr/bin/env php
+<?php
+
+require_once __DIR__ . '/load.php';
+
+set_time_limit(0);
+
+use App\Lib\Google\Drive\DefaultClient;
+use RedisQueue\Client as RedisQueueClient;
+use RedisQueue\Message;
+use RedisQueue\Worker;
+
+class WorkerBackup extends Worker
+{
+    public function do(Message $message)
+    {
+        $cmd = $message->cmd;
+        print("--------\n");
+        print("CMD: $cmd\n");
+        if ($cmd === 'upload') {
+            $this->upload($message);
+        }
+        print("--------\n");
+    }
+
+    protected function upload($message)
+    {
+        $lock_file = ROOT_PATH . '/upload.lock';
+        touch($lock_file);
+        $data = get_data();
+        $item = null;
+        foreach ($data as $path => $status) {
+            if (!$status) {
+                $item = $path;
+                break;
+            }
+        }
+        if (!$item) {
+            @unlink($lock_file);
+            return;
+        }
+        console_log("Zip...");
+        $files = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($item),
+            RecursiveIteratorIterator::LEAVES_ONLY
+        );
+        $name = basename($item);
+        $zip_path = ROOT_PATH . "/$name.zip";
+        try {
+            $zip = new ZipArchive();
+            $zip->open($zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+            foreach ($files as $file) {
+                // Skip directories (they would be added automatically)
+                if (!$file->isDir()) {
+                    // Get real and relative path for current file
+                    $filePath = $file->getRealPath();
+                    $relativePath = substr($filePath, strlen($item) + 1);
+
+                    // Add current file to archive
+                    $to = substr($relativePath, strpos($relativePath, $path));
+                    $arr = explode('/', trim($to, '/'));
+                    array_shift($arr);
+                    $to = implode('/', $arr);
+                    $zip->addFile($filePath, $to);
+                }
+            }
+            $zip->close();
+            console_log("Zip completed.");
+            $defaultClient = new DefaultClient(ROOT_PATH . '/google_credentials.json', ROOT_PATH . '/token.json');
+            console_log("Upload file...");
+            $defaultClient->uploadFile($zip_path, "$name.zip", 'application/zip');
+            console_log("Upload completed.");
+            $data = get_data();
+            $data[$item] = true;
+            file_put_contents(ROOT_PATH . '/data.json', json_encode($data));
+        } catch (Exception $e) {
+            console_log("ERROR: " . $e->getMessage());
+        }
+        @unlink($lock_file);
+        @unlink($zip_path);
+    }
+}
+
+try {
+    $lock_file = ROOT_PATH . '/upload.lock';
+    @unlink($lock_file);
+    $client = new RedisQueueClient();
+    $client->loop('backup_video_queue', new WorkerBackup());
+} catch (Exception $e) {
+    print($e->getMessage() . "\n");
+}
