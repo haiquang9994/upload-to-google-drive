@@ -40,8 +40,9 @@ class WorkerBackup extends Worker
             return;
         }
         console_log("Zip...");
+        $root_path = realpath($item);
         $files = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($item),
+            new RecursiveDirectoryIterator($root_path),
             RecursiveIteratorIterator::LEAVES_ONLY
         );
         $name = basename($item);
@@ -54,14 +55,10 @@ class WorkerBackup extends Worker
                 if (!$file->isDir()) {
                     // Get real and relative path for current file
                     $filePath = $file->getRealPath();
-                    $relativePath = substr($filePath, strlen($item) + 1);
+                    $relativePath = substr($filePath, strlen($root_path) + 1);
 
                     // Add current file to archive
-                    $to = substr($relativePath, strpos($relativePath, $path));
-                    $arr = explode('/', trim($to, '/'));
-                    array_shift($arr);
-                    $to = implode('/', $arr);
-                    $zip->addFile($filePath, $to);
+                    $zip->addFile($filePath, $relativePath);
                 }
             }
             $zip->close();
