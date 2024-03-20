@@ -19,6 +19,8 @@ class WorkerBackup extends Worker
         print("CMD: $cmd\n");
         if ($cmd === 'upload') {
             $this->upload($message);
+        } elseif ($cmd === 'upload_video') {
+            $this->upload_video($message);
         }
         print("--------\n");
     }
@@ -75,6 +77,50 @@ class WorkerBackup extends Worker
         }
         @unlink($lock_file);
         @unlink($zip_path);
+    }
+
+    protected function upload_video($message)
+    {
+        $lock_file = ROOT_PATH . '/upload.lock';
+        touch($lock_file);
+        $data = get_video();
+        $item = null;
+        foreach ($data as $path => $status) {
+            if (!$status) {
+                $item = $path;
+                break;
+            }
+        }
+        if (!$item) {
+            @unlink($lock_file);
+            return;
+        }
+        console_log("Create MP4...");
+        $root_path = realpath($item);
+        $video = basename($root_path);
+        try {
+            $size = '1080';
+            $path = "$root_path/$size/.m3u8";
+            $content = file_get_contents($path);
+            $content = preg_replace("/(\d+.ts)/", "$root_path/$size/$1", $content);
+            $content = str_replace('URI="key_url"', 'URI="' . $root_path . '/key"', $content);
+            file_put_contents("$root_path/$size.m3u8", $content);
+            @unlink("$root_path/$video.mp4");
+            exec("ffmpeg -allowed_extensions ALL -i \"$root_path/$size.m3u8\" -codec copy $root_path/$video.mp4");
+            @unlink("$root_path/$size.m3u8");
+            console_log("MP4 completed.");
+            $defaultClient = new DefaultClient(ROOT_PATH . '/google_credentials.json', ROOT_PATH . '/token.json');
+            console_log("Upload file...");
+            $defaultClient->uploadFile("$root_path/$video.mp4", "$video.mp4", 'video/mp4');
+            console_log("Upload completed.");
+            $data = get_video();
+            $data[$item] = true;
+            file_put_contents(ROOT_PATH . '/video.json', json_encode($data));
+        } catch (Exception $e) {
+            console_log("ERROR: " . $e->getMessage());
+        }
+        @unlink($lock_file);
+        @unlink("$root_path/$video.mp4");
     }
 }
 

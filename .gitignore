@@ -2,6 +2,8 @@ vendor
 token.json
 google_credentials.json
 data.json
+video.json
+upload.lock
 data
 .env
 .DS_Store

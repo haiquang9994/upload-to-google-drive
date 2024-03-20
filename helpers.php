@@ -50,3 +50,18 @@ if (!function_exists('get_data')) {
         return $data;
     }
 }
+
+if (!function_exists('get_video')) {
+    function get_video()
+    {
+        $path = ROOT_PATH . '/video.json';
+        $videos = [];
+        if (is_readable($path)) {
+            $body = @json_decode(@file_get_contents($path), true);
+            if (is_array($body)) {
+                $videos = $body;
+            }
+        }
+        return $videos;
+    }
+}
