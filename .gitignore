@@ -7,3 +7,6 @@ upload.lock
 data
 .env
 .DS_Store
+tmp/*
+
+!.gitkeep

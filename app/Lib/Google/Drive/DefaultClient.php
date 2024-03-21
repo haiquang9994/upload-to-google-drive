@@ -30,11 +30,11 @@ class DefaultClient
 
     protected $token_path;
 
-    public function __construct(string $credentials_file, string $token_path)
+    public function __construct($root_name = "BACKUP", string $credentials_file, string $token_path)
     {
         $this->credentials_file = $credentials_file;
         $this->token_path = $token_path;
-        $this->root_name = "BACKUP_VIDEOS";
+        $this->root_name = $root_name;//"BACKUP_VIDEOS";
         $this->initRoot();
     }
 

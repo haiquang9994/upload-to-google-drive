@@ -10,6 +10,61 @@ use RedisQueue\Client as RedisQueueClient;
 use RedisQueue\Message;
 use RedisQueue\Worker;
 
+function prepare_m3u8($m3u8_path, $key_path, $path)
+{
+    $m3u8_path = realpath($m3u8_path);
+    $key_path = realpath($key_path);
+    $m3u8_content = file_get_contents($m3u8_path);
+    $ts_dir = dirname($m3u8_path);
+    preg_match('/URI="([^)]+)"/', $m3u8_content, $key_check);
+    if ($key_check) {
+        $m3u8_content = str_replace($key_check[0], "URI=\"$key_path\"", $m3u8_content);
+    }
+    $m3u8_content = preg_replace("/(\d+.ts)/", "$ts_dir/$1", $m3u8_content);
+    file_put_contents($path, $m3u8_content);
+}
+
+function prepare_video($video_path, $tmp_dir = null)
+{
+    if (!$tmp_dir) {
+        $tmp_dir = sys_get_temp_dir();
+    }
+
+    $name = basename($video_path);
+
+    $audio_dir = $video_path . '/audio';
+    $has_audio = is_readable($audio_dir . '/.m3u8');
+    $v1080_dir = $video_path . '/1080';
+
+    $audio_tmp_output_path = $tmp_dir . '/audio.mp3';
+    $video_tmp_output_path = $tmp_dir . '/video.mp4';
+    $full_video_tmp_output_path = $tmp_dir . '/full_video.mp4';
+
+    @unlink($audio_tmp_output_path);
+    @unlink($video_tmp_output_path);
+    @unlink($full_video_tmp_output_path);
+
+    $video_m3u8_path = $name . '.1080.m3u8';
+    prepare_m3u8($v1080_dir . '/.m3u8', $video_path . '/key', $video_m3u8_path);
+    exec("ffmpeg -allowed_extensions ALL -i $video_m3u8_path -codec copy $video_tmp_output_path");
+    @unlink($video_m3u8_path);
+
+    if ($has_audio) {
+        $audio_m3u8_path = $name . '.mp3.m3u8';
+        prepare_m3u8($audio_dir . '/.m3u8', $video_path . '/key', $audio_m3u8_path);
+        exec("ffmpeg -allowed_extensions ALL -i $audio_m3u8_path $audio_tmp_output_path");
+        @unlink($audio_m3u8_path);
+
+        exec("ffmpeg -i $video_tmp_output_path -i $audio_tmp_output_path -c:v copy -c:a aac $full_video_tmp_output_path");
+        @unlink($video_tmp_output_path);
+        @unlink($audio_tmp_output_path);
+
+        return $full_video_tmp_output_path;
+    }
+
+    return $video_tmp_output_path;
+}
+
 class WorkerBackup extends Worker
 {
     public function do(Message $message)
@@ -65,7 +120,7 @@ class WorkerBackup extends Worker
             }
             $zip->close();
             console_log("Zip completed.");
-            $defaultClient = new DefaultClient(ROOT_PATH . '/google_credentials.json', ROOT_PATH . '/token.json');
+            $defaultClient = new DefaultClient("BACKUP_ZIPS", ROOT_PATH . '/google_credentials.json', ROOT_PATH . '/token.json');
             console_log("Upload file...");
             $defaultClient->uploadFile($zip_path, "$name.zip", 'application/zip');
             console_log("Upload completed.");
@@ -97,30 +152,22 @@ class WorkerBackup extends Worker
         }
         console_log("Create MP4...");
         $root_path = realpath($item);
-        $video = basename($root_path);
         try {
-            $size = '1080';
-            $path = "$root_path/$size/.m3u8";
-            $content = file_get_contents($path);
-            $content = preg_replace("/(\d+.ts)/", "$root_path/$size/$1", $content);
-            $content = str_replace('URI="key_url"', 'URI="' . $root_path . '/key"', $content);
-            file_put_contents("$root_path/$size.m3u8", $content);
-            @unlink("$root_path/$video.mp4");
-            exec("ffmpeg -allowed_extensions ALL -i \"$root_path/$size.m3u8\" -codec copy $root_path/$video.mp4");
-            @unlink("$root_path/$size.m3u8");
+            $video_path = prepare_video($root_path, ROOT_PATH . '/tmp');
             console_log("MP4 completed.");
-            $defaultClient = new DefaultClient(ROOT_PATH . '/google_credentials.json', ROOT_PATH . '/token.json');
+            $defaultClient = new DefaultClient("BACKUP_VIDEOS", ROOT_PATH . '/google_credentials.json', ROOT_PATH . '/token.json');
             console_log("Upload file...");
-            $defaultClient->uploadFile("$root_path/$video.mp4", "$video.mp4", 'video/mp4');
+            $video = basename($root_path);
+            $defaultClient->uploadFile($video_path, "$video.mp4", 'video/mp4');
             console_log("Upload completed.");
             $data = get_video();
             $data[$item] = true;
             file_put_contents(ROOT_PATH . '/video.json', json_encode($data));
+            @unlink($video_path);
         } catch (Exception $e) {
             console_log("ERROR: " . $e->getMessage());
         }
         @unlink($lock_file);
-        @unlink("$root_path/$video.mp4");
     }
 }
 
